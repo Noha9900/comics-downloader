@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    environment:
+      TELEGRAM_API_ID: "${TELEGRAM_API_ID}"
+      TELEGRAM_API_HASH: "${TELEGRAM_API_HASH}"
+      TELEGRAM_LOCAL: "1"
+    ports:
+      - "8081:8081"
+    volumes:
+      - telegram-bot-api-data:/var/lib/telegram-bot-api
+
+  comic-bot:
+    build: .
+    environment:
+      BOT_TOKEN: "${BOT_TOKEN}"
+      # Point the Python bot to the local API server we just created above
+      TELEGRAM_API_URL: "http://telegram-bot-api:8081" 
+      # Port for the dummy web server to keep Render happy
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      - telegram-bot-api
+    volumes:
+      # Map a temp folder to process the massive downloads
+      - bot-temp-data:/tmp
+
+volumes:
+  telegram-bot-api-data:
+  bot-temp-data:
