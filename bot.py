@@ -1,9 +1,8 @@
 import os
 import asyncio
 import shutil
+import requests
 import img2pdf
-import cloudscraper
-from bs4 import BeautifulSoup
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -12,6 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, FSInputFile
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from playwright.async_api import async_playwright
 
 # --- CONFIGURATION & SMART DETECTION ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -32,7 +32,7 @@ class DownloadFlow(StatesGroup):
     waiting_for_name = State()
 
 async def handle_ping(request):
-    return web.Response(text="Comic Bot is running securely with the Omni-Scanner Fallback!")
+    return web.Response(text="Comic Bot is running securely with Playwright Headless Browser!")
 
 async def start_web_server():
     app = web.Application()
@@ -43,66 +43,53 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# --- THE OMNI-SCANNER FALLBACK SCRAPER ---
-async def universal_fallback_scraper(url, temp_dir):
-    """An aggressive Cloudflare-bypassing scraper that searches multiple HTML layouts."""
+# --- THE ULTIMATE HEADLESS BROWSER SCRAPER ---
+async def ultimate_browser_scraper(url, temp_dir):
+    """Opens a real, invisible browser to bypass JS-rendering and Cloudflare."""
     try:
-        # Mimic a real Chrome browser to bypass Cloudflare
-        scraper = cloudscraper.create_scraper(browser={
-            'browser': 'chrome',
-            'platform': 'windows',
-            'desktop': True
-        })
-        
-        # Fetch the page bypassing Cloudflare
-        response = await asyncio.to_thread(scraper.get, url, timeout=20)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        images = []
-        
-        # A massive list of CSS selectors used by different comic site themes
-        target_selectors = [
-            '.reading-content img',         # Standard Madara theme
-            '.wp-manga-chapter-img',        # Madara alternative
-            '.entry-content img',           # Standard WordPress blog format
-            '.post-content img',            # Generic blog format
-            '#chapter-video-list img',      # Some custom readers
-            '.comic-pages img',             # Custom comic themes
-            '.page-break img',              # Blogger / old WP themes
-            'article img',                  # Generic HTML5 article
-            '.separator a img'              # Old school Blogger gallery
-        ]
-        
-        # Hunt for images using all known layouts
-        for selector in target_selectors:
-            for img in soup.select(selector):
-                # Sites use different tags for lazy-loading, check them all
-                src = img.get('data-src') or img.get('data-lazy-src') or img.get('src')
-                
-                if src:
-                    src = src.strip()
-                    # Make sure it's a real image URL and not a base64 placeholder
-                    if src.startswith('http') and src not in images:
-                        # Filter out tiny icons and logos if possible
-                        if 'logo' not in src.lower() and 'icon' not in src.lower():
-                            images.append(src)
+        async with async_playwright() as p:
+            # Launch a headless Chromium browser
+            browser = await p.chromium.launch(headless=True)
             
-            # If we found a good batch of images with this layout, stop searching
-            if len(images) > 3:
-                break
-        
-        if not images:
-            return False 
+            # Create a context with a realistic User-Agent to fool Cloudflare
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = await context.new_page()
             
-        # Download the images we found
-        for i, img_url in enumerate(images):
-            img_res = await asyncio.to_thread(scraper.get, img_url)
-            with open(os.path.join(temp_dir, f"page_{i:03d}.jpg"), 'wb') as f:
-                f.write(img_res.content)
+            # Go to the URL and wait until the network is quiet (meaning all JS finished loading)
+            await page.goto(url, wait_until="networkidle", timeout=60000)
+            
+            # Wait an extra 3 seconds for any lazy-loaded images to trigger
+            await asyncio.sleep(3)
+            
+            # Inject JavaScript directly into the page to extract all image sources
+            image_urls = await page.evaluate('''() => {
+                let imgs = Array.from(document.querySelectorAll('img'));
+                return imgs.map(img => img.src || img.getAttribute('data-src') || img.getAttribute('data-lazy-src'))
+                           .filter(src => src && src.startsWith('http') && !src.match(/logo|icon|avatar|banner|button/i));
+            }''')
+            
+            await browser.close()
+            
+            # Remove duplicates while preserving order
+            image_urls = list(dict.fromkeys(image_urls))
+            
+            if not image_urls:
+                return False
                 
-        return True
+            # Download the extracted images
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            for i, img_url in enumerate(image_urls):
+                img_res = await asyncio.to_thread(requests.get, img_url, headers=headers)
+                if img_res.status_code == 200:
+                    with open(os.path.join(temp_dir, f"page_{i:03d}.jpg"), 'wb') as f:
+                        f.write(img_res.content)
+                    
+            return True
+            
     except Exception as e:
-        print(f"Fallback Error: {e}")
+        print(f"Playwright Error: {e}")
         return False
 
 # --- BOT LOGIC ---
@@ -139,11 +126,11 @@ async def process_name_and_download(message: Message, state: FSMContext):
 
         # --- THE FALLBACK HOOK ---
         if "Unsupported URL" in error_log or "403 Forbidden" in error_log:
-            await status_msg.edit_text("⚠️ Site blocked or unsupported by primary tool. Engaging Omni-Scanner Fallback...")
-            fallback_success = await universal_fallback_scraper(url, temp_dir)
+            await status_msg.edit_text("⚠️ Site blocked or unsupported by primary tool. Engaging Headless Browser...")
+            fallback_success = await ultimate_browser_scraper(url, temp_dir)
             
             if not fallback_success:
-                await status_msg.edit_text(f"❌ **Both Scrapers Failed.** \nThe site either has extreme protection, or the link is to a main gallery instead of a readable chapter.\n\n`{error_log[:200]}`", parse_mode="Markdown")
+                await status_msg.edit_text(f"❌ **Both Scrapers Failed.** \nThe site is actively fighting the headless browser or no images loaded in time.\n\n`{error_log[:200]}`", parse_mode="Markdown")
                 return
 
         # 2. Find images
@@ -155,7 +142,7 @@ async def process_name_and_download(message: Message, state: FSMContext):
                     image_files.append(os.path.join(root, file))
 
         if not image_files:
-            await status_msg.edit_text("❌ No images found after scanning. The site layout might be completely hidden from bots.")
+            await status_msg.edit_text("❌ No images found. The site's layout is completely hidden from bots.")
             return
 
         base_name = custom_name if custom_name.lower() != 'skip' else "Comic_Download"
