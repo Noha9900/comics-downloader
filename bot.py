@@ -2,7 +2,7 @@ import os
 import asyncio
 import shutil
 import img2pdf
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -32,7 +32,7 @@ class DownloadFlow(StatesGroup):
     waiting_for_name = State()
 
 async def handle_ping(request):
-    return web.Response(text="Comic Bot is running securely!")
+    return web.Response(text="Comic Bot is running securely with Cloudflare Bypass!")
 
 async def start_web_server():
     app = web.Application()
@@ -43,12 +43,19 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# --- THE NEW UNIVERSAL FALLBACK SCRAPER ---
+# --- THE CLOUDFLARE BUSTER FALLBACK SCRAPER ---
 async def universal_fallback_scraper(url, temp_dir):
-    """A backup scraper for WP-Manga/Madara sites not supported by gallery-dl."""
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    """A Cloudflare-bypassing scraper for WP-Manga/Madara sites."""
     try:
-        response = await asyncio.to_thread(requests.get, url, headers=headers, timeout=15)
+        # Create a Cloudscraper instance that mimics a real Chrome browser
+        scraper = cloudscraper.create_scraper(browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        })
+        
+        # Fetch the page bypassing Cloudflare
+        response = await asyncio.to_thread(scraper.get, url, timeout=20)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         images = []
@@ -56,16 +63,16 @@ async def universal_fallback_scraper(url, temp_dir):
         for img in soup.select('.reading-content img, .wp-manga-chapter-img'):
             src = img.get('data-src') or img.get('src')
             if src:
-                src = src.strip() # Clean up hidden spaces
+                src = src.strip()
                 if src.startswith('http'):
                     images.append(src)
         
         if not images:
-            return False # Fallback couldn't find anything
+            return False 
             
-        # Download the images we found
+        # Download images using the same Cloudflare-bypassing session
         for i, img_url in enumerate(images):
-            img_res = await asyncio.to_thread(requests.get, img_url, headers=headers)
+            img_res = await asyncio.to_thread(scraper.get, img_url)
             with open(os.path.join(temp_dir, f"page_{i:03d}.jpg"), 'wb') as f:
                 f.write(img_res.content)
                 
@@ -107,12 +114,12 @@ async def process_name_and_download(message: Message, state: FSMContext):
         error_log = stderr.decode('utf-8').strip() or stdout.decode('utf-8').strip()
 
         # --- THE FALLBACK HOOK ---
-        if "Unsupported URL" in error_log:
-            await status_msg.edit_text("⚠️ Site not supported by primary tool. Engaging Universal Fallback Scraper...")
+        if "Unsupported URL" in error_log or "403 Forbidden" in error_log:
+            await status_msg.edit_text("⚠️ Site blocked or unsupported by primary tool. Engaging Cloudflare Buster...")
             fallback_success = await universal_fallback_scraper(url, temp_dir)
             
             if not fallback_success:
-                await status_msg.edit_text(f"❌ **Both Scrapers Failed.** \nThe site either has heavy Cloudflare protection, or the link is to a main gallery instead of a readable chapter.\n\n`{error_log[:200]}`", parse_mode="Markdown")
+                await status_msg.edit_text(f"❌ **Both Scrapers Failed.** \nThe site either has extreme protection, or the link is to a main gallery instead of a readable chapter.\n\n`{error_log[:200]}`", parse_mode="Markdown")
                 return
 
         # 2. Find images
