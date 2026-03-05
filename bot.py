@@ -32,7 +32,7 @@ class DownloadFlow(StatesGroup):
     waiting_for_name = State()
 
 async def handle_ping(request):
-    return web.Response(text="Comic Bot is running securely with Cloudflare Bypass!")
+    return web.Response(text="Comic Bot is running securely with the Omni-Scanner Fallback!")
 
 async def start_web_server():
     app = web.Application()
@@ -43,11 +43,11 @@ async def start_web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# --- THE CLOUDFLARE BUSTER FALLBACK SCRAPER ---
+# --- THE OMNI-SCANNER FALLBACK SCRAPER ---
 async def universal_fallback_scraper(url, temp_dir):
-    """A Cloudflare-bypassing scraper for WP-Manga/Madara sites."""
+    """An aggressive Cloudflare-bypassing scraper that searches multiple HTML layouts."""
     try:
-        # Create a Cloudscraper instance that mimics a real Chrome browser
+        # Mimic a real Chrome browser to bypass Cloudflare
         scraper = cloudscraper.create_scraper(browser={
             'browser': 'chrome',
             'platform': 'windows',
@@ -59,18 +59,42 @@ async def universal_fallback_scraper(url, temp_dir):
         soup = BeautifulSoup(response.text, 'html.parser')
         
         images = []
-        # Target standard Madara/WP-Manga image classes
-        for img in soup.select('.reading-content img, .wp-manga-chapter-img'):
-            src = img.get('data-src') or img.get('src')
-            if src:
-                src = src.strip()
-                if src.startswith('http'):
-                    images.append(src)
+        
+        # A massive list of CSS selectors used by different comic site themes
+        target_selectors = [
+            '.reading-content img',         # Standard Madara theme
+            '.wp-manga-chapter-img',        # Madara alternative
+            '.entry-content img',           # Standard WordPress blog format
+            '.post-content img',            # Generic blog format
+            '#chapter-video-list img',      # Some custom readers
+            '.comic-pages img',             # Custom comic themes
+            '.page-break img',              # Blogger / old WP themes
+            'article img',                  # Generic HTML5 article
+            '.separator a img'              # Old school Blogger gallery
+        ]
+        
+        # Hunt for images using all known layouts
+        for selector in target_selectors:
+            for img in soup.select(selector):
+                # Sites use different tags for lazy-loading, check them all
+                src = img.get('data-src') or img.get('data-lazy-src') or img.get('src')
+                
+                if src:
+                    src = src.strip()
+                    # Make sure it's a real image URL and not a base64 placeholder
+                    if src.startswith('http') and src not in images:
+                        # Filter out tiny icons and logos if possible
+                        if 'logo' not in src.lower() and 'icon' not in src.lower():
+                            images.append(src)
+            
+            # If we found a good batch of images with this layout, stop searching
+            if len(images) > 3:
+                break
         
         if not images:
             return False 
             
-        # Download images using the same Cloudflare-bypassing session
+        # Download the images we found
         for i, img_url in enumerate(images):
             img_res = await asyncio.to_thread(scraper.get, img_url)
             with open(os.path.join(temp_dir, f"page_{i:03d}.jpg"), 'wb') as f:
@@ -115,7 +139,7 @@ async def process_name_and_download(message: Message, state: FSMContext):
 
         # --- THE FALLBACK HOOK ---
         if "Unsupported URL" in error_log or "403 Forbidden" in error_log:
-            await status_msg.edit_text("⚠️ Site blocked or unsupported by primary tool. Engaging Cloudflare Buster...")
+            await status_msg.edit_text("⚠️ Site blocked or unsupported by primary tool. Engaging Omni-Scanner Fallback...")
             fallback_success = await universal_fallback_scraper(url, temp_dir)
             
             if not fallback_success:
@@ -131,7 +155,7 @@ async def process_name_and_download(message: Message, state: FSMContext):
                     image_files.append(os.path.join(root, file))
 
         if not image_files:
-            await status_msg.edit_text("❌ No images found after scanning.")
+            await status_msg.edit_text("❌ No images found after scanning. The site layout might be completely hidden from bots.")
             return
 
         base_name = custom_name if custom_name.lower() != 'skip' else "Comic_Download"
