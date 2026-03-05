@@ -1,7 +1,7 @@
-# Use an official Python runtime as a parent image
+# Use an official Python runtime
 FROM python:3.11-slim
 
-# Install system dependencies (needed for image processing and gallery-dl)
+# Install basic system dependencies
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
@@ -11,11 +11,14 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory
 WORKDIR /app
 
-# Copy requirements and install them
+# Copy requirements and install Python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the bot code
+# CRITICAL UPGRADE: Install Playwright and all required browser dependencies
+RUN playwright install chromium --with-deps
+
+# Copy the bot code
 COPY bot.py .
 
 # Command to run the bot
