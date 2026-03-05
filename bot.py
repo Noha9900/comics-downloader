@@ -82,7 +82,9 @@ async def process_name_and_download(message: Message, state: FSMContext):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        
+        # UPGRADE: We now capture the exact error logs from the terminal!
+        stdout, stderr = await process.communicate()
 
         # 2. Find images
         await status_msg.edit_text("⚙️ Analyzing downloaded files...")
@@ -93,7 +95,16 @@ async def process_name_and_download(message: Message, state: FSMContext):
                     image_files.append(os.path.join(root, file))
 
         if not image_files:
-            await status_msg.edit_text("❌ No images found. Site might be protected or link is invalid.")
+            # UPGRADE: Decode the terminal error and send it to Telegram
+            error_log = stderr.decode('utf-8').strip() or stdout.decode('utf-8').strip()
+            
+            # Truncate the error so it doesn't exceed Telegram's message limits
+            error_log = error_log[:800] if error_log else "Unknown Error (Site might be completely blocking bots)."
+            
+            await status_msg.edit_text(
+                f"❌ **No images found.**\n\n**Here is what the server said:**\n`{error_log}`", 
+                parse_mode="Markdown"
+            )
             return
 
         # 3. Handle Naming
