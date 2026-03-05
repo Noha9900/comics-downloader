@@ -1,5 +1,4 @@
-# CRITICAL FIX: Use 'bookworm' (Debian 12) instead of 'slim' (Debian 13)
-# This ensures Playwright's dependency installer finds the exact package names it wants.
+# Use the highly stable 'bookworm' (Debian 12) so Playwright installs perfectly
 FROM python:3.11-bookworm
 
 # Install basic system dependencies
@@ -16,11 +15,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and its browser dependencies
+# Install Playwright and its browser dependencies (The Plan D Upgrade)
 RUN playwright install chromium --with-deps
 
 # Copy the bot code
 COPY bot.py .
 
-# Command to run the bot
-CMD ["python", "bot.py"]]
+# Command to run the bot (Shell form to prevent Render bracket errors)
+CMD python bot.py
